@@ -174,3 +174,15 @@ def test_version_is_rejected_outside_upgrade(
     monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "2.0.0")
 
     assert not make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+
+
+def test_state_directory_is_scoped_to_owning_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "state"))
+    common = make_plugin(tmp_path / "common")
+    local = make_plugin(tmp_path / "local")
+
+    assert common._state_directory("install/shared/tool.py") != local._state_directory(
+        "install/shared/tool.py"
+    )

@@ -73,6 +73,7 @@ class Install(Plugin):
                 command,
                 cwd=self._context.base_directory(),
                 env=environment,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -195,15 +196,17 @@ class Install(Plugin):
         return environment
 
     def _state_directory(self, installer_id: str) -> Path:
+        repo_root = Path(self._context.base_directory()).resolve()
         if os.name == "nt":
             state_root = os.environ.get("LOCALAPPDATA")
         else:
             state_root = os.environ.get("XDG_STATE_HOME")
         if not state_root:
             state_root = str(Path.home() / ".local" / "state")
-        digest = hashlib.sha256(installer_id.encode("utf-8")).hexdigest()[:12]
+        identity = "{}:{}".format(repo_root.name, installer_id)
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
         name = Path(installer_id).stem
-        return Path(state_root) / "dotbot-install" / "{}-{}".format(name, digest)
+        return Path(state_root) / "dotbot-install" / "{}-{}-{}".format(repo_root.name, name, digest)
 
     @staticmethod
     def _host_family() -> str:
