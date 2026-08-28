@@ -30,8 +30,8 @@ class Install(Plugin):
     def handle(self, directive: str, data: Any) -> bool:
         if directive != self._directive:
             raise ValueError("Install cannot handle directive {}".format(directive))
-        configured_paths = self._configured_paths(data)
-        if configured_paths is None:
+        configured_installers = self._configured_installers(data)
+        if configured_installers is None:
             return False
 
         operation = os.environ.get("DOTBOT_INSTALL_OPERATION", "apply").strip().lower()
@@ -45,7 +45,7 @@ class Install(Plugin):
 
         host_family = self._host_family()
         prepared = self._prepare_installers(
-            configured_paths,
+            configured_installers,
             operation,
             requested_version,
             host_family,
@@ -54,51 +54,60 @@ class Install(Plugin):
             return False
 
         if self._context.dry_run():
-            for installer_id, _ in prepared:
-                action = self._action_message(operation, installer_id, requested_version)
-                self._log.action("Would {}".format(action))
+            for installer_id, description, _ in prepared:
+                self._log.action(
+                    "Would run installer {} [{}]".format(description, installer_id)
+                )
             return True
 
-        for installer_id, command in prepared:
-            action = self._action_message(operation, installer_id, requested_version)
-            self._log.action(action.capitalize())
+        for installer_id, description, command in prepared:
+            self._log.action("{} [{}]".format(description, installer_id))
             if not self._run_installer(command, installer_id, operation, requested_version):
                 return False
         return True
 
-    def _configured_paths(self, data: Any) -> Optional[List[str]]:
-        if isinstance(data, str):
-            values = [data]
-        elif isinstance(data, list):
-            values = data
-        else:
-            self._log.error("Install directives require an installer path or a list of paths")
+    def _configured_installers(self, data: Any) -> Optional[List[Tuple[str, str]]]:
+        if not isinstance(data, list) or not data:
+            self._log.error(
+                "Install directives require a non-empty list of "
+                "[installer path, description] entries"
+            )
             return None
 
-        if not values:
-            self._log.error("Install directive lists must not be empty")
-            return None
-
-        configured_paths = []
-        for index, value in enumerate(values, start=1):
-            if not isinstance(value, str) or not value.strip():
+        configured_installers = []
+        for index, value in enumerate(data, start=1):
+            if not isinstance(value, list) or len(value) != 2:
                 self._log.error(
-                    "Install directive entry {} must be a non-empty installer path".format(index)
+                    "Install directive entry {} must contain exactly "
+                    "[installer path, description]".format(index)
                 )
                 return None
-            configured_paths.append(value.strip())
-        return configured_paths
+            configured_path, description = value
+            if not isinstance(configured_path, str) or not configured_path.strip():
+                self._log.error(
+                    "Install directive entry {} path must be a non-empty string".format(index)
+                )
+                return None
+            if not isinstance(description, str) or not description.strip():
+                self._log.error(
+                    "Install directive entry {} description must be a non-empty string".format(
+                        index
+                    )
+                )
+                return None
+            configured_installers.append((configured_path.strip(), description.strip()))
+        return configured_installers
 
     def _prepare_installers(
         self,
-        configured_paths: List[str],
+        configured_installers: List[Tuple[str, str]],
         operation: str,
         requested_version: str,
         host_family: str,
-    ) -> Optional[List[Tuple[str, List[str]]]]:
+    ) -> Optional[List[Tuple[str, str, List[str]]]]:
         prepared = []
         valid = True
-        for configured_path in configured_paths:
+        for configured_path, description in configured_installers:
             resolved = self._resolve_installer(configured_path)
             if resolved is None:
                 valid = False
@@ -122,7 +131,7 @@ class Install(Plugin):
             if command is None:
                 valid = False
                 continue
-            prepared.append((installer_id, command))
+            prepared.append((installer_id, description, command))
         return prepared if valid else None
 
     def _run_installer(
@@ -283,14 +292,6 @@ class Install(Plugin):
         if value is None:
             return "1"
         return "0" if value.strip().lower() in {"0", "false", "no", "off"} else "1"
-
-    @staticmethod
-    def _action_message(operation: str, installer_id: str, requested_version: str) -> str:
-        verbs = {"apply": "apply", "status": "check", "upgrade": "upgrade"}
-        message = "{} installer {}".format(verbs[operation], installer_id)
-        if requested_version:
-            message += " to {}".format(requested_version)
-        return message
 
     def _log_diagnostics(self, diagnostics: str, succeeded: bool) -> None:
         for line in diagnostics.splitlines():

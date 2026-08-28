@@ -2,6 +2,7 @@ import json
 from argparse import Namespace
 from pathlib import Path
 from typing import Dict, Optional
+from unittest.mock import Mock
 
 import pytest
 from dotbot.context import Context
@@ -12,6 +13,10 @@ from install import Install
 def make_plugin(repo: Path, dry_run: bool = False) -> Install:
     context = Context(str(repo), Namespace(dry_run=dry_run))
     return Install(context)
+
+
+def installer(path: str, description: str = "Installing tool") -> list:
+    return [path, description]
 
 
 def write_python_installer(repo: Path, path: str, body: str) -> Path:
@@ -52,7 +57,25 @@ def test_apply_runs_one_installer_and_accepts_current(tmp_path: Path) -> None:
         python_installer("current"),
     )
 
-    assert make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+    assert make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
+
+
+def test_description_is_logged_with_installer_path(tmp_path: Path) -> None:
+    write_python_installer(
+        tmp_path,
+        "install/shared/tool.py",
+        python_installer("current"),
+    )
+    plugin = make_plugin(tmp_path)
+    action = Mock()
+    plugin._log.action = action
+
+    assert plugin.handle(
+        "install", [installer("install/shared/tool.py", "Installing example tool")]
+    )
+    action.assert_called_once_with("Installing example tool [install/shared/tool.py]")
 
 
 def test_list_runs_installers_in_order(tmp_path: Path) -> None:
@@ -70,14 +93,28 @@ def test_list_runs_installers_in_order(tmp_path: Path) -> None:
 
     assert make_plugin(tmp_path).handle(
         "install",
-        ["install/shared/first.py", "install/shared/second.py"],
+        [
+            installer("install/shared/first.py", "Installing first"),
+            installer("install/shared/second.py", "Installing second"),
+        ],
     )
     assert marker.read_text(encoding="utf-8").splitlines() == ["first", "second"]
 
 
 @pytest.mark.parametrize(
     "data",
-    [[], {}, ["install/shared/tool.py", 7], ["install/shared/tool.py", " "]],
+    [
+        "install/shared/tool.py",
+        [],
+        {},
+        ["install/shared/tool.py", "Installing tool"],
+        [["install/shared/tool.py"]],
+        [["install/shared/tool.py", "Installing tool", "extra"]],
+        [[7, "Installing tool"]],
+        [[" ", "Installing tool"]],
+        [["install/shared/tool.py", 7]],
+        [["install/shared/tool.py", " "]],
+    ],
 )
 def test_directive_rejects_invalid_payloads(tmp_path: Path, data: object) -> None:
     assert not make_plugin(tmp_path).handle("install", data)
@@ -93,7 +130,10 @@ def test_list_preflights_every_path_before_execution(tmp_path: Path) -> None:
 
     assert not make_plugin(tmp_path).handle(
         "install",
-        ["install/shared/first.py", "install/shared/missing.py"],
+        [
+            installer("install/shared/first.py", "Installing first"),
+            installer("install/shared/missing.py", "Installing missing"),
+        ],
     )
     assert not marker.exists()
 
@@ -113,7 +153,10 @@ def test_list_stops_after_first_execution_failure(tmp_path: Path) -> None:
 
     assert not make_plugin(tmp_path).handle(
         "install",
-        ["install/shared/first.py", "install/shared/second.py"],
+        [
+            installer("install/shared/first.py", "Installing first"),
+            installer("install/shared/second.py", "Installing second"),
+        ],
     )
     assert not marker.exists()
 
@@ -121,7 +164,9 @@ def test_list_stops_after_first_execution_failure(tmp_path: Path) -> None:
 def test_path_must_remain_under_install(tmp_path: Path) -> None:
     write_python_installer(tmp_path, "outside.py", python_installer("current"))
 
-    assert not make_plugin(tmp_path).handle("install", "install/shared/../../outside.py")
+    assert not make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/../../outside.py")]
+    )
 
 
 def test_platform_mismatch_fails_before_execution(
@@ -135,7 +180,9 @@ def test_platform_mismatch_fails_before_execution(
     )
     monkeypatch.setattr(Install, "_host_family", staticmethod(lambda: "windows"))
 
-    assert not make_plugin(tmp_path).handle("install", "install/unix/tool.py")
+    assert not make_plugin(tmp_path).handle(
+        "install", [installer("install/unix/tool.py")]
+    )
     assert not marker.exists()
 
 
@@ -147,7 +194,9 @@ def test_dry_run_does_not_execute_installer(tmp_path: Path) -> None:
         python_installer("current", marker=marker),
     )
 
-    assert make_plugin(tmp_path, dry_run=True).handle("install", "install/shared/tool.py")
+    assert make_plugin(tmp_path, dry_run=True).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
     assert not marker.exists()
 
 
@@ -159,7 +208,9 @@ def test_apply_requires_a_converged_state(tmp_path: Path, state: str) -> None:
         python_installer(state),
     )
 
-    assert not make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+    assert not make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
 
 
 @pytest.mark.parametrize(
@@ -176,7 +227,9 @@ def test_status_accepts_every_protocol_state(
     )
     monkeypatch.setenv("DOTBOT_INSTALL_OPERATION", "status")
 
-    assert make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+    assert make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
 
 
 def test_nonzero_exit_fails_even_with_valid_state(tmp_path: Path) -> None:
@@ -186,7 +239,9 @@ def test_nonzero_exit_fails_even_with_valid_state(tmp_path: Path) -> None:
         python_installer("current", exit_code=9),
     )
 
-    assert not make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+    assert not make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
 
 
 @pytest.mark.parametrize("output", ["", "unknown", "current\ncurrent"])
@@ -194,7 +249,9 @@ def test_stdout_must_contain_exactly_one_state(tmp_path: Path, output: str) -> N
     body = "print({!r}, end='')".format(output)
     write_python_installer(tmp_path, "install/shared/tool.py", body)
 
-    assert not make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+    assert not make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
 
 
 def test_upgrade_passes_operation_version_and_environment(
@@ -222,7 +279,9 @@ def test_upgrade_passes_operation_version_and_environment(
     monkeypatch.setenv("DOTBOT_INSTALL_OPERATION", "upgrade")
     monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "2.0.0")
 
-    assert make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+    assert make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
     result: Dict[str, object] = json.loads(result_file.read_text(encoding="utf-8"))
     assert result == {
         "args": ["upgrade", "2.0.0"],
@@ -243,7 +302,9 @@ def test_version_is_rejected_outside_upgrade(
     )
     monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "2.0.0")
 
-    assert not make_plugin(tmp_path).handle("install", "install/shared/tool.py")
+    assert not make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py")]
+    )
 
 
 def test_state_directory_is_scoped_to_owning_repository(

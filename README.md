@@ -5,19 +5,18 @@ Dotbot continues to select and order installers; this plugin validates and invok
 
 ## Dotbot directive
 
-Load `install.py` as a Dotbot plugin, then provide either one installer path or an ordered list:
+Load `install.py` as a Dotbot plugin, then provide an ordered list of installer-description pairs:
 
 ```yaml
-- install: install/unix/texlive
-
 - install:
-    - install/shared/example.py
-    - install/unix/example
+    - [install/shared/example.py, Installing the shared example]
+    - [install/unix/example, Installing the Unix example]
 ```
 
-Every value must be a relative path to one file below `install/unix/`, `install/windows/`, or `install/shared/` in the repository Dotbot is applying.
-The scalar form invokes one installer.
-The list form preflights every entry before any installer runs, executes entries in declaration order, and stops after the first execution failure.
+The first value in each pair must be a relative path to one file below `install/unix/`, `install/windows/`, or `install/shared/` in the repository Dotbot is applying.
+The second value must be a non-empty description that the plugin prints when it invokes that installer.
+The plugin also includes the installer path in brackets, matching the traceability of Dotbot's `shell` directive.
+The plugin preflights every entry before any installer runs, executes entries in declaration order, and stops after the first execution failure.
 
 Platform affinity is structural.
 `install/windows/` runs only from a Windows Dotbot process, while `install/unix/` runs only from Linux, macOS, or WSL.
