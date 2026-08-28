@@ -34,6 +34,17 @@ def python_installer(state: str, exit_code: int = 0, marker: Optional[Path] = No
     return "\n".join(lines)
 
 
+def recording_installer(marker: Path, name: str, state: str = "current") -> str:
+    return "\n".join(
+        [
+            "from pathlib import Path",
+            "with Path({!r}).open('a', encoding='utf-8') as stream:".format(str(marker)),
+            "    stream.write({!r} + '\\n')".format(name),
+            "print({!r})".format(state),
+        ]
+    )
+
+
 def test_apply_runs_one_installer_and_accepts_current(tmp_path: Path) -> None:
     write_python_installer(
         tmp_path,
@@ -44,8 +55,67 @@ def test_apply_runs_one_installer_and_accepts_current(tmp_path: Path) -> None:
     assert make_plugin(tmp_path).handle("install", "install/shared/tool.py")
 
 
-def test_directive_requires_one_scalar_path(tmp_path: Path) -> None:
-    assert not make_plugin(tmp_path).handle("install", ["install/shared/tool.py"])
+def test_list_runs_installers_in_order(tmp_path: Path) -> None:
+    marker = tmp_path / "order"
+    write_python_installer(
+        tmp_path,
+        "install/shared/first.py",
+        recording_installer(marker, "first"),
+    )
+    write_python_installer(
+        tmp_path,
+        "install/shared/second.py",
+        recording_installer(marker, "second"),
+    )
+
+    assert make_plugin(tmp_path).handle(
+        "install",
+        ["install/shared/first.py", "install/shared/second.py"],
+    )
+    assert marker.read_text(encoding="utf-8").splitlines() == ["first", "second"]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [[], {}, ["install/shared/tool.py", 7], ["install/shared/tool.py", " "]],
+)
+def test_directive_rejects_invalid_payloads(tmp_path: Path, data: object) -> None:
+    assert not make_plugin(tmp_path).handle("install", data)
+
+
+def test_list_preflights_every_path_before_execution(tmp_path: Path) -> None:
+    marker = tmp_path / "marker"
+    write_python_installer(
+        tmp_path,
+        "install/shared/first.py",
+        python_installer("current", marker=marker),
+    )
+
+    assert not make_plugin(tmp_path).handle(
+        "install",
+        ["install/shared/first.py", "install/shared/missing.py"],
+    )
+    assert not marker.exists()
+
+
+def test_list_stops_after_first_execution_failure(tmp_path: Path) -> None:
+    marker = tmp_path / "marker"
+    write_python_installer(
+        tmp_path,
+        "install/shared/first.py",
+        python_installer("blocked"),
+    )
+    write_python_installer(
+        tmp_path,
+        "install/shared/second.py",
+        python_installer("current", marker=marker),
+    )
+
+    assert not make_plugin(tmp_path).handle(
+        "install",
+        ["install/shared/first.py", "install/shared/second.py"],
+    )
+    assert not marker.exists()
 
 
 def test_path_must_remain_under_install(tmp_path: Path) -> None:

@@ -1,20 +1,23 @@
 # dotbot-install
 
-`dotbot-install` adds one lifecycle-aware installer directive to
-[Dotbot](https://github.com/anishathalye/dotbot).
+`dotbot-install` adds one lifecycle-aware installer directive to [Dotbot](https://github.com/anishathalye/dotbot).
 Dotbot continues to select and order installers; this plugin validates and invokes each selected script through a small protocol.
 
 ## Dotbot directive
 
-Load `install.py` as a Dotbot plugin, then place one installer path in each directive:
+Load `install.py` as a Dotbot plugin, then provide either one installer path or an ordered list:
 
 ```yaml
 - install: install/unix/texlive
-- install: install/shared/example.py
+
+- install:
+    - install/shared/example.py
+    - install/unix/example
 ```
 
-The value must be a relative path to one file below `install/unix/`, `install/windows/`, or `install/shared/` in the repository Dotbot is applying.
-One directive invokes exactly one installer.
+Every value must be a relative path to one file below `install/unix/`, `install/windows/`, or `install/shared/` in the repository Dotbot is applying.
+The scalar form invokes one installer.
+The list form preflights every entry before any installer runs, executes entries in declaration order, and stops after the first execution failure.
 
 Platform affinity is structural.
 `install/windows/` runs only from a Windows Dotbot process, while `install/unix/` runs only from Linux, macOS, or WSL.
@@ -76,7 +79,7 @@ Python installers run with the Python interpreter already running Dotbot.
 On Windows, `.ps1` installers run with PowerShell 7 when available and Windows PowerShell otherwise.
 On Unix-family hosts, other installer files must be executable and provide their own shebang.
 
-Dotbot dry-run logs the installer that would run without starting the child process.
+Dotbot dry-run logs every installer that would run without starting a child process.
 Paths are canonicalized before execution, and paths or symlinks that escape the owning repository's `install/` directory are rejected.
 
 ## Development

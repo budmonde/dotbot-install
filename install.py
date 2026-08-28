@@ -30,8 +30,8 @@ class Install(Plugin):
     def handle(self, directive: str, data: Any) -> bool:
         if directive != self._directive:
             raise ValueError("Install cannot handle directive {}".format(directive))
-        if not isinstance(data, str) or not data.strip():
-            self._log.error("Install directives require one non-empty installer path")
+        configured_paths = self._configured_paths(data)
+        if configured_paths is None:
             return False
 
         operation = os.environ.get("DOTBOT_INSTALL_OPERATION", "apply").strip().lower()
@@ -43,29 +43,95 @@ class Install(Plugin):
             self._log.error("DOTBOT_INSTALL_VERSION is valid only for upgrade operations")
             return False
 
-        resolved = self._resolve_installer(data.strip())
-        if resolved is None:
-            return False
-        installer_path, installer_id, affinity = resolved
-
         host_family = self._host_family()
-        if affinity != "shared" and affinity != host_family:
-            self._log.error(
-                "Installer {} targets {}, but Dotbot is running on {}".format(
-                    installer_id, affinity, host_family
-                )
-            )
+        prepared = self._prepare_installers(
+            configured_paths,
+            operation,
+            requested_version,
+            host_family,
+        )
+        if prepared is None:
             return False
 
-        action = self._action_message(operation, installer_id, requested_version)
         if self._context.dry_run():
-            self._log.action("Would {}".format(action))
+            for installer_id, _ in prepared:
+                action = self._action_message(operation, installer_id, requested_version)
+                self._log.action("Would {}".format(action))
             return True
-        self._log.action(action.capitalize())
 
-        command = self._command(installer_path, operation, requested_version, host_family)
-        if command is None:
-            return False
+        for installer_id, command in prepared:
+            action = self._action_message(operation, installer_id, requested_version)
+            self._log.action(action.capitalize())
+            if not self._run_installer(command, installer_id, operation, requested_version):
+                return False
+        return True
+
+    def _configured_paths(self, data: Any) -> Optional[List[str]]:
+        if isinstance(data, str):
+            values = [data]
+        elif isinstance(data, list):
+            values = data
+        else:
+            self._log.error("Install directives require an installer path or a list of paths")
+            return None
+
+        if not values:
+            self._log.error("Install directive lists must not be empty")
+            return None
+
+        configured_paths = []
+        for index, value in enumerate(values, start=1):
+            if not isinstance(value, str) or not value.strip():
+                self._log.error(
+                    "Install directive entry {} must be a non-empty installer path".format(index)
+                )
+                return None
+            configured_paths.append(value.strip())
+        return configured_paths
+
+    def _prepare_installers(
+        self,
+        configured_paths: List[str],
+        operation: str,
+        requested_version: str,
+        host_family: str,
+    ) -> Optional[List[Tuple[str, List[str]]]]:
+        prepared = []
+        valid = True
+        for configured_path in configured_paths:
+            resolved = self._resolve_installer(configured_path)
+            if resolved is None:
+                valid = False
+                continue
+            installer_path, installer_id, affinity = resolved
+            if affinity != "shared" and affinity != host_family:
+                self._log.error(
+                    "Installer {} targets {}, but Dotbot is running on {}".format(
+                        installer_id, affinity, host_family
+                    )
+                )
+                valid = False
+                continue
+
+            command = self._command(
+                installer_path,
+                operation,
+                requested_version,
+                host_family,
+            )
+            if command is None:
+                valid = False
+                continue
+            prepared.append((installer_id, command))
+        return prepared if valid else None
+
+    def _run_installer(
+        self,
+        command: List[str],
+        installer_id: str,
+        operation: str,
+        requested_version: str,
+    ) -> bool:
         environment = self._environment(installer_id, operation, requested_version)
 
         try:
