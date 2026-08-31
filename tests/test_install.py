@@ -15,8 +15,13 @@ def make_plugin(repo: Path, dry_run: bool = False) -> Install:
     return Install(context)
 
 
-def installer(path: str, description: str = "Installing tool") -> list:
-    return [path, description]
+def installer(
+    path: str, description: str = "Installing tool", desired_version: str = ""
+) -> list:
+    result = [path, description]
+    if desired_version:
+        result.append(desired_version)
+    return result
 
 
 def write_python_installer(repo: Path, path: str, body: str) -> Path:
@@ -109,11 +114,13 @@ def test_list_runs_installers_in_order(tmp_path: Path) -> None:
         {},
         ["install/shared/tool.py", "Installing tool"],
         [["install/shared/tool.py"]],
-        [["install/shared/tool.py", "Installing tool", "extra"]],
+        [["install/shared/tool.py", "Installing tool", "1.2.3", "extra"]],
         [[7, "Installing tool"]],
         [[" ", "Installing tool"]],
         [["install/shared/tool.py", 7]],
         [["install/shared/tool.py", " "]],
+        [["install/shared/tool.py", "Installing tool", 7]],
+        [["install/shared/tool.py", "Installing tool", " "]],
     ],
 )
 def test_directive_rejects_invalid_payloads(tmp_path: Path, data: object) -> None:
@@ -254,7 +261,7 @@ def test_stdout_must_contain_exactly_one_state(tmp_path: Path, output: str) -> N
     )
 
 
-def test_upgrade_passes_operation_version_and_environment(
+def test_apply_passes_per_entry_version_and_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     result_file = tmp_path / "result.json"
@@ -269,42 +276,82 @@ def test_upgrade_passes_operation_version_and_environment(
             "    'id': os.environ['DOTBOT_INSTALL_ID'],",
             "    'operation': os.environ['DOTBOT_INSTALL_OPERATION'],",
             "    'protocol': os.environ['DOTBOT_INSTALL_PROTOCOL_VERSION'],",
-            "    'version': os.environ['DOTBOT_INSTALL_VERSION'],",
+            "    'desired_version': os.environ['DOTBOT_INSTALL_DESIRED_VERSION'],",
+            "    'legacy_version': os.environ.get('DOTBOT_INSTALL_VERSION'),",
             "}",
             "Path({!r}).write_text(json.dumps(result), encoding='utf-8')".format(str(result_file)),
             "print('current')",
         ]
     )
     write_python_installer(tmp_path, "install/shared/tool.py", body)
-    monkeypatch.setenv("DOTBOT_INSTALL_OPERATION", "upgrade")
-    monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "2.0.0")
+    monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "legacy-global-value")
+
+    assert make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool.py", desired_version="2.0.0")]
+    )
+    result: Dict[str, object] = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result == {
+        "args": ["apply", "2.0.0"],
+        "id": "install/shared/tool.py",
+        "operation": "apply",
+        "protocol": "2",
+        "desired_version": "2.0.0",
+        "legacy_version": None,
+    }
+
+
+def test_omitted_version_clears_inherited_version_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result_file = tmp_path / "result.json"
+    body = "\n".join(
+        [
+            "import json",
+            "import os",
+            "from pathlib import Path",
+            "result = {",
+            "    'desired': os.environ.get('DOTBOT_INSTALL_DESIRED_VERSION'),",
+            "    'legacy': os.environ.get('DOTBOT_INSTALL_VERSION'),",
+            "}",
+            "Path({!r}).write_text(json.dumps(result), encoding='utf-8')".format(str(result_file)),
+            "print('current')",
+        ]
+    )
+    write_python_installer(tmp_path, "install/shared/tool.py", body)
+    monkeypatch.setenv("DOTBOT_INSTALL_DESIRED_VERSION", "inherited")
+    monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "legacy")
 
     assert make_plugin(tmp_path).handle(
         "install", [installer("install/shared/tool.py")]
     )
-    result: Dict[str, object] = json.loads(result_file.read_text(encoding="utf-8"))
-    assert result == {
-        "args": ["upgrade", "2.0.0"],
-        "id": "install/shared/tool.py",
-        "operation": "upgrade",
-        "protocol": "1",
-        "version": "2.0.0",
+    assert json.loads(result_file.read_text(encoding="utf-8")) == {
+        "desired": None,
+        "legacy": None,
     }
 
 
-def test_version_is_rejected_outside_upgrade(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_python_installer(
-        tmp_path,
-        "install/shared/tool.py",
-        python_installer("current"),
+def test_versions_are_isolated_per_entry(tmp_path: Path) -> None:
+    result_file = tmp_path / "versions"
+    body = "\n".join(
+        [
+            "import os",
+            "from pathlib import Path",
+            "with Path({!r}).open('a', encoding='utf-8') as stream:".format(str(result_file)),
+            "    stream.write(os.environ.get('DOTBOT_INSTALL_DESIRED_VERSION', '-') + '\\n')",
+            "print('current')",
+        ]
     )
-    monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "2.0.0")
+    write_python_installer(tmp_path, "install/shared/first.py", body)
+    write_python_installer(tmp_path, "install/shared/second.py", body)
 
-    assert not make_plugin(tmp_path).handle(
-        "install", [installer("install/shared/tool.py")]
+    assert make_plugin(tmp_path).handle(
+        "install",
+        [
+            installer("install/shared/first.py", desired_version="1.0.0"),
+            installer("install/shared/second.py"),
+        ],
     )
+    assert result_file.read_text(encoding="utf-8").splitlines() == ["1.0.0", "-"]
 
 
 def test_state_directory_is_scoped_to_owning_repository(

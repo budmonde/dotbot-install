@@ -4,17 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dotbot-install"
-version = "0.3.0"
+version = "0.4.0"
 description = "A lifecycle-aware installer directive for Dotbot"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = ["dotbot>=1.23"]
 
+[project.scripts]
+dotbot-install-runner = "runner:entrypoint"
+
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
 [tool.setuptools]
-py-modules = ["install"]
+py-modules = ["install", "runner"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
