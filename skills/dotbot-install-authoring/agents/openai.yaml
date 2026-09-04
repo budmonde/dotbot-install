@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dotbot Install Authoring"
+  short_description: "Author minimal lifecycle-aware Dotbot installers"
+  default_prompt: "Design or review a minimal dotbot-install resource from an explicit ownership and lifecycle contract."

@@ -136,3 +136,12 @@ Install the test dependencies and run the suite:
 python -m pip install -e ".[test]"
 python -m pytest
 ```
+
+## Agent skill
+
+The repository publishes `skills/dotbot-install-authoring/` for agents that author or review consuming-repository installers.
+The skill covers ownership decisions,
+minimal lifecycle design,
+interactive-process constraints,
+destructive-operation boundaries,
+and proportionate verification in addition to the wire protocol above.
