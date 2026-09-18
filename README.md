@@ -2,33 +2,38 @@
 
 `dotbot-install` adds one lifecycle-aware installer directive and runner to [Dotbot](https://github.com/anishathalye/dotbot).
 Dotbot continues to select and order installers.
-The plugin validates and invokes each selected script through a small protocol.
+The plugin validates and invokes each selected installer command through a small protocol.
 
 ## Dotbot directive
 
 Load `install.py` as a Dotbot plugin,
-then provide an ordered list of path-description pairs with optional exact versions:
+then provide an ordered list of command-description pairs:
 
 ```yaml
 - install:
     - [install/shared/example.py, Installing the shared example]
-    - [install/unix/example, Installing the Unix example, "1.2.3"]
+    - [[install/unix/example, configured-target, --version, "1.2.3"], Installing the Unix example]
 ```
 
 An entry contains exactly:
 
 ```text
 [installer-path, description]
-[installer-path, description, "desired-version"]
+[[installer-path, configured-argument, ...], description]
 ```
 
-The path must resolve to a file below `install/unix/`,
+An installer-path string is shorthand for a one-item argument list.
+Use a nested list when an installer needs configured arguments.
+Each list item becomes exactly one process argument without shell parsing.
+The first command item must resolve to a file below `install/unix/`,
 `install/windows/`,
 or `install/shared/` in the repository Dotbot is applying.
 The description must be a non-empty string.
-The optional desired version must be a non-empty string and should always be quoted in YAML.
+Installer-specific configuration belongs in the command,
+including an optional `--version <desired-version>` argument when the installer supports exact versions.
+The plugin treats configured arguments as opaque and never passes them through a shell.
 
-The plugin includes the installer path in its output,
+The plugin includes the installer argument list in its output,
 preflights every entry before execution,
 runs entries in declaration order,
 and stops after the first execution failure.
@@ -45,14 +50,14 @@ or WSL.
 The plugin calls the script through one of these forms:
 
 ```text
-<installer> status [desired-version]
-<installer> apply [desired-version]
-<installer> upgrade [desired-version]
+<installer> [configured-arguments...] status
+<installer> [configured-arguments...] apply
+<installer> [configured-arguments...] upgrade
 ```
 
 `apply` is the default.
 The runner selects upgrade mode through `--upgrade`.
-The optional version belongs to the current directive entry and is passed for every operation.
+The lifecycle operation is always the final argument appended by the plugin.
 
 The script prints exactly one lifecycle state to standard output:
 
@@ -68,8 +73,8 @@ An unexpected installer failure uses a nonzero exit status.
 
 `status` must be read-only.
 `apply` must idempotently converge recipe intent without upgrading an existing unpinned resource.
-`upgrade` may advance an unpinned manager-controlled resource,
-but an exact recipe version remains authoritative.
+`upgrade` may advance an unpinned manager-controlled resource.
+An exact version configured in the installer command remains authoritative for every operation.
 
 After `apply` or `upgrade`,
 `current`,
@@ -84,17 +89,15 @@ The child process receives:
 
 | Variable | Meaning |
 | --- | --- |
-| `DOTBOT_INSTALL_PROTOCOL_VERSION` | Protocol version, currently `2`. |
-| `DOTBOT_INSTALL_OPERATION` | `status`, `apply`, or `upgrade`. |
-| `DOTBOT_INSTALL_DESIRED_VERSION` | The current entry's exact desired version, or unset. |
-| `DOTBOT_INSTALL_ID` | Installer path relative to the owning repository. |
 | `DOTBOT_INSTALL_REPO_ROOT` | Canonical path to the owning repository. |
-| `DOTBOT_INSTALL_STATE_DIR` | Stable per-installer state directory. |
-| `DOTBOT_INSTALL_LOCK_FILE` | Conventional repository integrity-lock path. |
 | `DOTBOT_INSTALL_ONLINE` | `1` unless the launcher disables online work. |
 
-The plugin does not create state or lock files and does not implement package-manager or release backends.
-Those remain owned by the consuming repository.
+The plugin does not define installer identity,
+state storage,
+lock files,
+package-manager behavior,
+or release policy.
+Those remain owned by the consuming repository and its installer commands.
 
 ## Lifecycle runner
 
@@ -112,7 +115,6 @@ Argument abbreviation is disabled.
 Unknown options,
 `--help`,
 and `--version` remain Dotbot arguments.
-An optional `--` bridge is accepted but not required.
 
 Consumers may import `run_dotbot` when a repository-specific launcher must assemble Dotbot configuration arguments first.
 

@@ -2,52 +2,43 @@
 
 ## Directive entry
 
-The plugin accepts a nonempty ordered list of entries in either form:
+The plugin accepts a nonempty ordered list of command-description entries:
 
 ```yaml
 - install:
     - [install/shared/example.py, Installing the shared example]
-    - [install/unix/example, Installing the Unix example, "1.2.3"]
+    - [[install/unix/example, configured-target, --version, "1.2.3"], Installing the Unix example]
 ```
 
-The first item is a repository-relative installer path,
-the second is the nonempty description logged before execution,
-and the optional third item is a quoted exact version.
+The first item is a repository-relative installer path or argument list, and the second is the nonempty description logged before execution.
+An installer-path string is shorthand for a one-item argument list.
+Use a nested list when an installer needs configured arguments.
+Each list item becomes exactly one process argument without shell parsing.
+Installer-specific configuration belongs in the command, including an optional `--version <desired-version>` argument when the installer supports exact versions.
 The plugin preflights the whole list and stops after the first execution failure.
 
-Platform affinity follows the first path component:
+Platform affinity follows the first command item's path component:
 
 - `install/shared/` runs on Windows and Unix-family hosts;
 - `install/windows/` runs only on Windows;
-- `install/unix/` runs on Linux,
-  macOS,
-  and WSL.
+- `install/unix/` runs on Linux, macOS, and WSL.
 
 ## Script interface
 
 The plugin invokes one of these forms:
 
 ```text
-<installer> status [desired-version]
-<installer> apply [desired-version]
-<installer> upgrade [desired-version]
+<installer> [configured-arguments...] status
+<installer> [configured-arguments...] apply
+<installer> [configured-arguments...] upgrade
 ```
 
 The child receives:
 
 | Variable | Meaning |
 | --- | --- |
-| `DOTBOT_INSTALL_PROTOCOL_VERSION` | Protocol version, currently `2`. |
-| `DOTBOT_INSTALL_OPERATION` | `status`, `apply`, or `upgrade`. |
-| `DOTBOT_INSTALL_DESIRED_VERSION` | Current entry's exact desired version, or unset. |
-| `DOTBOT_INSTALL_ID` | Installer path relative to the consuming repository. |
 | `DOTBOT_INSTALL_REPO_ROOT` | Canonical consuming-repository path. |
-| `DOTBOT_INSTALL_STATE_DIR` | Stable per-repository, per-installer state directory. |
-| `DOTBOT_INSTALL_LOCK_FILE` | Conventional consuming-repository integrity-lock path. |
 | `DOTBOT_INSTALL_ONLINE` | `1` unless the launcher disables online work. |
-
-The plugin does not create the state directory or lock file.
-The consuming repository owns their use.
 
 ## Output and states
 
@@ -66,13 +57,8 @@ Diagnostics go to stderr.
 Unexpected execution failures use a nonzero exit status.
 
 All six states are informational during `status`.
-After `apply` or `upgrade`,
-`current`,
-`update-available`,
-and `unsupported` are successful outcomes.
-`absent`,
-`drifted`,
-and `blocked` mean mutation did not converge.
+After `apply` or `upgrade`, `current`, `update-available`, and `unsupported` are successful outcomes.
+`absent`, `drifted`, and `blocked` mean mutation did not converge.
 
 ## Operation policy
 
@@ -86,36 +72,28 @@ For an unpinned resource:
 
 For an exact recipe version:
 
-- the third entry item is the sole version-selection authority;
+- the installer command's version argument is the sole version-selection authority;
 - `status` compares against that target;
-- `apply` converges that target,
-  including a supported owned downgrade;
+- `apply` converges that target, including a supported owned downgrade;
 - `upgrade` may converge the target but never move past it;
 - a backend that cannot honor an exact target rejects it rather than silently ignoring it.
 
 ## Process boundary
 
 The plugin invokes installers with null stdin and captures stdout and stderr until the child exits.
-Only the recipe description is logged before execution.
-The default protocol therefore supports unattended children,
-not live prompts or device-code instructions.
+The recipe description and configured installer argument list are logged before execution.
+Installer commands must not contain secrets.
+The default protocol therefore supports unattended children, not live prompts or device-code instructions.
 
 Python resources use the interpreter already running Dotbot.
-Windows PowerShell resources use PowerShell 7 when available and Windows PowerShell otherwise,
-with `-NonInteractive`.
+Windows PowerShell resources use PowerShell 7 when available and Windows PowerShell otherwise, with `-NonInteractive`.
 Unix resources other than Python must be executable and provide their own shebang.
 
 Dotbot dry-run logs prepared resources without starting child processes.
-The plugin rejects absolute paths,
-missing files,
-platform mismatches,
-and resolved paths that escape the consuming repository's `install/` tree.
+The plugin rejects absolute paths, missing files, platform mismatches, and resolved paths that escape the consuming repository's `install/` tree.
 
 ## Ownership boundary
 
-The plugin supplies no package-manager,
-release,
-authentication,
-or application backend.
+The plugin supplies no package-manager, release, authentication, application backend, installer identity, state directory, or lock-file convention.
 It also does not define which external state a resource may replace.
 Those policies belong to the consuming repository and its accepted resource contract.

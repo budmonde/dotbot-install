@@ -1,4 +1,3 @@
-import hashlib
 import os
 import shutil
 import subprocess
@@ -49,45 +48,54 @@ class Install(Plugin):
             return False
 
         if self._context.dry_run():
-            for installer_id, description, _, _ in prepared:
+            for installer_argv, description, _ in prepared:
                 self._log.action(
-                    "Would run installer {} [{}]".format(description, installer_id)
+                    "Would run installer {} {}".format(description, installer_argv)
                 )
             return True
 
-        for installer_id, description, desired_version, command in prepared:
-            self._log.action("{} [{}]".format(description, installer_id))
-            if not self._run_installer(command, installer_id, operation, desired_version):
+        for installer_argv, description, command in prepared:
+            self._log.action("{} {}".format(description, installer_argv))
+            if not self._run_installer(command, str(installer_argv), operation):
                 return False
         return True
 
     def _configured_installers(
         self, data: Any
-    ) -> Optional[List[Tuple[str, str, str]]]:
+    ) -> Optional[List[Tuple[List[str], str]]]:
         if not isinstance(data, list) or not data:
             self._log.error(
                 "Install directives require a non-empty list of "
-                "[installer path, description] or "
-                "[installer path, description, desired version] entries"
+                "[installer command, description] entries"
             )
             return None
 
         configured_installers = []
         for index, value in enumerate(data, start=1):
-            if not isinstance(value, list) or len(value) not in {2, 3}:
+            if not isinstance(value, list) or len(value) != 2:
                 self._log.error(
                     "Install directive entry {} must contain "
-                    "[installer path, description] or "
-                    "[installer path, description, desired version]".format(index)
+                    "[installer command, description]".format(index)
                 )
                 return None
-            configured_path, description = value[:2]
-            desired_version = value[2] if len(value) == 3 else ""
-            if not isinstance(configured_path, str) or not configured_path.strip():
+            command_value, description = value
+            if isinstance(command_value, str):
+                installer_argv = [command_value.strip()]
+            elif isinstance(command_value, list):
+                installer_argv = list(command_value)
+            else:
+                installer_argv = []
+            if (
+                not installer_argv
+                or not all(isinstance(argument, str) for argument in installer_argv)
+                or not installer_argv[0].strip()
+            ):
                 self._log.error(
-                    "Install directive entry {} path must be a non-empty string".format(index)
+                    "Install directive entry {} command must be an installer path "
+                    "or a non-empty argument list beginning with one".format(index)
                 )
                 return None
+            installer_argv[0] = installer_argv[0].strip()
             if not isinstance(description, str) or not description.strip():
                 self._log.error(
                     "Install directive entry {} description must be a non-empty string".format(
@@ -95,38 +103,28 @@ class Install(Plugin):
                     )
                 )
                 return None
-            if not isinstance(desired_version, str) or (
-                len(value) == 3 and not desired_version.strip()
-            ):
-                self._log.error(
-                    "Install directive entry {} desired version must be a non-empty string".format(
-                        index
-                    )
-                )
-                return None
-            configured_installers.append(
-                (configured_path.strip(), description.strip(), desired_version.strip())
-            )
+            configured_installers.append((installer_argv, description.strip()))
         return configured_installers
 
     def _prepare_installers(
         self,
-        configured_installers: List[Tuple[str, str, str]],
+        configured_installers: List[Tuple[List[str], str]],
         operation: str,
         host_family: str,
-    ) -> Optional[List[Tuple[str, str, str, List[str]]]]:
+    ) -> Optional[List[Tuple[List[str], str, List[str]]]]:
         prepared = []
         valid = True
-        for configured_path, description, desired_version in configured_installers:
+        for installer_argv, description in configured_installers:
+            configured_path, installer_arguments = installer_argv[0], installer_argv[1:]
             resolved = self._resolve_installer(configured_path)
             if resolved is None:
                 valid = False
                 continue
-            installer_path, installer_id, affinity = resolved
+            installer_path, affinity = resolved
             if affinity != "shared" and affinity != host_family:
                 self._log.error(
                     "Installer {} targets {}, but Dotbot is running on {}".format(
-                        installer_id, affinity, host_family
+                        configured_path, affinity, host_family
                     )
                 )
                 valid = False
@@ -134,24 +132,23 @@ class Install(Plugin):
 
             command = self._command(
                 installer_path,
+                installer_arguments,
                 operation,
-                desired_version,
                 host_family,
             )
             if command is None:
                 valid = False
                 continue
-            prepared.append((installer_id, description, desired_version, command))
+            prepared.append((installer_argv, description, command))
         return prepared if valid else None
 
     def _run_installer(
         self,
         command: List[str],
-        installer_id: str,
+        installer_command: str,
         operation: str,
-        desired_version: str,
     ) -> bool:
-        environment = self._environment(installer_id, operation, desired_version)
+        environment = self._environment()
 
         try:
             result = subprocess.run(
@@ -167,7 +164,9 @@ class Install(Plugin):
                 check=False,
             )
         except OSError as error:
-            self._log.error("Unable to run installer {}: {}".format(installer_id, error))
+            self._log.error(
+                "Unable to run installer {}: {}".format(installer_command, error)
+            )
             return False
 
         output = [line.strip() for line in result.stdout.splitlines() if line.strip()]
@@ -179,24 +178,28 @@ class Install(Plugin):
         self._log_diagnostics(result.stderr, succeeded)
         if result.returncode != 0:
             self._log.error(
-                "Installer {} exited with status {}".format(installer_id, result.returncode)
+                "Installer {} exited with status {}".format(
+                    installer_command, result.returncode
+                )
             )
             return False
         if state not in self._states or len(output) != 1:
             self._log.error(
-                "Installer {} must emit exactly one lifecycle state on stdout".format(installer_id)
+                "Installer {} must emit exactly one lifecycle state on stdout".format(
+                    installer_command
+                )
             )
             return False
         if not succeeded:
             self._log.error(
-                "Installer {} did not converge: {}".format(installer_id, state)
+                "Installer {} did not converge: {}".format(installer_command, state)
             )
             return False
 
-        self._log.info("{}: {}".format(installer_id, state))
+        self._log.info("{}: {}".format(installer_command, state))
         return True
 
-    def _resolve_installer(self, configured_path: str) -> Optional[Tuple[Path, str, str]]:
+    def _resolve_installer(self, configured_path: str) -> Optional[Tuple[Path, str]]:
         repo_root = Path(self._context.base_directory()).resolve()
         install_root = (repo_root / "install").resolve()
         configured = Path(configured_path)
@@ -219,14 +222,13 @@ class Install(Plugin):
             return None
 
         affinity = relative.parts[0].lower()
-        installer_id = installer_path.relative_to(repo_root).as_posix()
-        return installer_path, installer_id, affinity
+        return installer_path, affinity
 
     def _command(
         self,
         installer_path: Path,
+        installer_arguments: List[str],
         operation: str,
-        desired_version: str,
         host_family: str,
     ) -> Optional[List[str]]:
         suffix = installer_path.suffix.lower()
@@ -255,46 +257,21 @@ class Install(Plugin):
             )
             return None
 
+        command.extend(installer_arguments)
         command.append(operation)
-        if desired_version:
-            command.append(desired_version)
         return command
 
-    def _environment(
-        self, installer_id: str, operation: str, desired_version: str
-    ) -> Dict[str, str]:
+    def _environment(self) -> Dict[str, str]:
         repo_root = Path(self._context.base_directory()).resolve()
         environment = os.environ.copy()
         environment.update(
             {
-                "DOTBOT_INSTALL_ID": installer_id,
-                "DOTBOT_INSTALL_LOCK_FILE": str(repo_root / "install" / "installer.lock.yaml"),
                 "DOTBOT_INSTALL_ONLINE": self._online_value(environment.get("DOTBOT_INSTALL_ONLINE")),
-                "DOTBOT_INSTALL_OPERATION": operation,
-                "DOTBOT_INSTALL_PROTOCOL_VERSION": "2",
                 "DOTBOT_INSTALL_REPO_ROOT": str(repo_root),
-                "DOTBOT_INSTALL_STATE_DIR": str(self._state_directory(installer_id)),
             }
         )
-        environment.pop("DOTBOT_INSTALL_VERSION", None)
-        if desired_version:
-            environment["DOTBOT_INSTALL_DESIRED_VERSION"] = desired_version
-        else:
-            environment.pop("DOTBOT_INSTALL_DESIRED_VERSION", None)
+        environment.pop("DOTBOT_INSTALL_OPERATION", None)
         return environment
-
-    def _state_directory(self, installer_id: str) -> Path:
-        repo_root = Path(self._context.base_directory()).resolve()
-        if os.name == "nt":
-            state_root = os.environ.get("LOCALAPPDATA")
-        else:
-            state_root = os.environ.get("XDG_STATE_HOME")
-        if not state_root:
-            state_root = str(Path.home() / ".local" / "state")
-        identity = "{}:{}".format(repo_root.name, installer_id)
-        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
-        name = Path(installer_id).stem
-        return Path(state_root) / "dotbot-install" / "{}-{}-{}".format(repo_root.name, name, digest)
 
     @staticmethod
     def _host_family() -> str:

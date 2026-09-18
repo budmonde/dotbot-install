@@ -1,7 +1,7 @@
 import json
 from argparse import Namespace
 from pathlib import Path
-from typing import Dict, Optional
+from typing import List, Optional, Union
 from unittest.mock import Mock
 
 import pytest
@@ -16,12 +16,9 @@ def make_plugin(repo: Path, dry_run: bool = False) -> Install:
 
 
 def installer(
-    path: str, description: str = "Installing tool", desired_version: str = ""
+    command: Union[str, List[str]], description: str = "Installing tool"
 ) -> list:
-    result = [path, description]
-    if desired_version:
-        result.append(desired_version)
-    return result
+    return [command, description]
 
 
 def write_python_installer(repo: Path, path: str, body: str) -> Path:
@@ -80,7 +77,76 @@ def test_description_is_logged_with_installer_path(tmp_path: Path) -> None:
     assert plugin.handle(
         "install", [installer("install/shared/tool.py", "Installing example tool")]
     )
-    action.assert_called_once_with("Installing example tool [install/shared/tool.py]")
+    action.assert_called_once_with("Installing example tool ['install/shared/tool.py']")
+
+
+def test_command_prefix_arguments_precede_operation(tmp_path: Path) -> None:
+    result_file = tmp_path / "result.json"
+    body = "\n".join(
+        [
+            "import json",
+            "import sys",
+            "from pathlib import Path",
+            "Path({!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')".format(
+                str(result_file)
+            ),
+            "print('current')",
+        ]
+    )
+    write_python_installer(tmp_path, "install/shared/tool.py", body)
+
+    assert make_plugin(tmp_path).handle(
+        "install",
+        [
+            installer(
+                [
+                    "install/shared/tool.py",
+                    "package-label",
+                    "--version",
+                    "2.0.0",
+                    "SDK_HOME=Machine:Path:C:\\Program Files\\SDK",
+                ]
+            )
+        ],
+    )
+    assert json.loads(result_file.read_text(encoding="utf-8")) == [
+        "package-label",
+        "--version",
+        "2.0.0",
+        "SDK_HOME=Machine:Path:C:\\Program Files\\SDK",
+        "apply",
+    ]
+
+
+def test_command_prefix_is_logged(tmp_path: Path) -> None:
+    write_python_installer(
+        tmp_path,
+        "install/shared/tool.py",
+        python_installer("current"),
+    )
+    plugin = make_plugin(tmp_path)
+    action = Mock()
+    plugin._log.action = action
+
+    assert plugin.handle(
+        "install",
+        [installer(["install/shared/tool.py", "package-label"], "Installing package")],
+    )
+    action.assert_called_once_with(
+        "Installing package ['install/shared/tool.py', 'package-label']"
+    )
+
+
+def test_scalar_command_is_one_literal_installer_path(tmp_path: Path) -> None:
+    write_python_installer(
+        tmp_path,
+        "install/shared/tool with spaces.py",
+        python_installer("current"),
+    )
+
+    assert make_plugin(tmp_path).handle(
+        "install", [installer("install/shared/tool with spaces.py")]
+    )
 
 
 def test_list_runs_installers_in_order(tmp_path: Path) -> None:
@@ -121,6 +187,9 @@ def test_list_runs_installers_in_order(tmp_path: Path) -> None:
         [["install/shared/tool.py", " "]],
         [["install/shared/tool.py", "Installing tool", 7]],
         [["install/shared/tool.py", "Installing tool", " "]],
+        [[[], "Installing tool"]],
+        [[[" ", "argument"], "Installing tool"]],
+        [[["install/shared/tool.py", 7], "Installing tool"]],
     ],
 )
 def test_directive_rejects_invalid_payloads(tmp_path: Path, data: object) -> None:
@@ -261,8 +330,8 @@ def test_stdout_must_contain_exactly_one_state(tmp_path: Path, output: str) -> N
     )
 
 
-def test_apply_passes_per_entry_version_and_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_child_receives_shared_environment_without_launcher_operation(
+    tmp_path: Path,
 ) -> None:
     result_file = tmp_path / "result.json"
     body = "\n".join(
@@ -273,94 +342,23 @@ def test_apply_passes_per_entry_version_and_environment(
             "from pathlib import Path",
             "result = {",
             "    'args': sys.argv[1:],",
-            "    'id': os.environ['DOTBOT_INSTALL_ID'],",
-            "    'operation': os.environ['DOTBOT_INSTALL_OPERATION'],",
-            "    'protocol': os.environ['DOTBOT_INSTALL_PROTOCOL_VERSION'],",
-            "    'desired_version': os.environ['DOTBOT_INSTALL_DESIRED_VERSION'],",
-            "    'legacy_version': os.environ.get('DOTBOT_INSTALL_VERSION'),",
+            "    'repo_root': os.environ['DOTBOT_INSTALL_REPO_ROOT'],",
+            "    'online': os.environ['DOTBOT_INSTALL_ONLINE'],",
+            "    'operation': os.environ.get('DOTBOT_INSTALL_OPERATION'),",
             "}",
             "Path({!r}).write_text(json.dumps(result), encoding='utf-8')".format(str(result_file)),
             "print('current')",
         ]
     )
     write_python_installer(tmp_path, "install/shared/tool.py", body)
-    monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "legacy-global-value")
-
-    assert make_plugin(tmp_path).handle(
-        "install", [installer("install/shared/tool.py", desired_version="2.0.0")]
-    )
-    result: Dict[str, object] = json.loads(result_file.read_text(encoding="utf-8"))
-    assert result == {
-        "args": ["apply", "2.0.0"],
-        "id": "install/shared/tool.py",
-        "operation": "apply",
-        "protocol": "2",
-        "desired_version": "2.0.0",
-        "legacy_version": None,
-    }
-
-
-def test_omitted_version_clears_inherited_version_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    result_file = tmp_path / "result.json"
-    body = "\n".join(
-        [
-            "import json",
-            "import os",
-            "from pathlib import Path",
-            "result = {",
-            "    'desired': os.environ.get('DOTBOT_INSTALL_DESIRED_VERSION'),",
-            "    'legacy': os.environ.get('DOTBOT_INSTALL_VERSION'),",
-            "}",
-            "Path({!r}).write_text(json.dumps(result), encoding='utf-8')".format(str(result_file)),
-            "print('current')",
-        ]
-    )
-    write_python_installer(tmp_path, "install/shared/tool.py", body)
-    monkeypatch.setenv("DOTBOT_INSTALL_DESIRED_VERSION", "inherited")
-    monkeypatch.setenv("DOTBOT_INSTALL_VERSION", "legacy")
-
-    assert make_plugin(tmp_path).handle(
-        "install", [installer("install/shared/tool.py")]
-    )
-    assert json.loads(result_file.read_text(encoding="utf-8")) == {
-        "desired": None,
-        "legacy": None,
-    }
-
-
-def test_versions_are_isolated_per_entry(tmp_path: Path) -> None:
-    result_file = tmp_path / "versions"
-    body = "\n".join(
-        [
-            "import os",
-            "from pathlib import Path",
-            "with Path({!r}).open('a', encoding='utf-8') as stream:".format(str(result_file)),
-            "    stream.write(os.environ.get('DOTBOT_INSTALL_DESIRED_VERSION', '-') + '\\n')",
-            "print('current')",
-        ]
-    )
-    write_python_installer(tmp_path, "install/shared/first.py", body)
-    write_python_installer(tmp_path, "install/shared/second.py", body)
-
     assert make_plugin(tmp_path).handle(
         "install",
-        [
-            installer("install/shared/first.py", desired_version="1.0.0"),
-            installer("install/shared/second.py"),
-        ],
+        [installer(["install/shared/tool.py", "--version", "2.0.0"])],
     )
-    assert result_file.read_text(encoding="utf-8").splitlines() == ["1.0.0", "-"]
-
-
-def test_state_directory_is_scoped_to_owning_repository(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "state"))
-    common = make_plugin(tmp_path / "common")
-    local = make_plugin(tmp_path / "local")
-
-    assert common._state_directory("install/shared/tool.py") != local._state_directory(
-        "install/shared/tool.py"
-    )
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result == {
+        "args": ["--version", "2.0.0", "apply"],
+        "repo_root": str(tmp_path.resolve()),
+        "online": "1",
+        "operation": None,
+    }
