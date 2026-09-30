@@ -266,22 +266,16 @@ class Install(Plugin):
         environment = os.environ.copy()
         environment.update(
             {
-                "DOTBOT_INSTALL_ONLINE": self._online_value(environment.get("DOTBOT_INSTALL_ONLINE")),
                 "DOTBOT_INSTALL_REPO_ROOT": str(repo_root),
             }
         )
+        environment.pop("DOTBOT_INSTALL_ONLINE", None)
         environment.pop("DOTBOT_INSTALL_OPERATION", None)
         return environment
 
     @staticmethod
     def _host_family() -> str:
         return "windows" if os.name == "nt" else "unix"
-
-    @staticmethod
-    def _online_value(value: Optional[str]) -> str:
-        if value is None:
-            return "1"
-        return "0" if value.strip().lower() in {"0", "false", "no", "off"} else "1"
 
     def _log_diagnostics(self, diagnostics: str, succeeded: bool) -> None:
         for line in diagnostics.splitlines():

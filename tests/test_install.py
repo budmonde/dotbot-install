@@ -332,7 +332,9 @@ def test_stdout_must_contain_exactly_one_state(tmp_path: Path, output: str) -> N
 
 def test_child_receives_shared_environment_without_launcher_operation(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("DOTBOT_INSTALL_ONLINE", "0")
     result_file = tmp_path / "result.json"
     body = "\n".join(
         [
@@ -343,7 +345,7 @@ def test_child_receives_shared_environment_without_launcher_operation(
             "result = {",
             "    'args': sys.argv[1:],",
             "    'repo_root': os.environ['DOTBOT_INSTALL_REPO_ROOT'],",
-            "    'online': os.environ['DOTBOT_INSTALL_ONLINE'],",
+            "    'online': os.environ.get('DOTBOT_INSTALL_ONLINE'),",
             "    'operation': os.environ.get('DOTBOT_INSTALL_OPERATION'),",
             "}",
             "Path({!r}).write_text(json.dumps(result), encoding='utf-8')".format(str(result_file)),
@@ -359,6 +361,6 @@ def test_child_receives_shared_environment_without_launcher_operation(
     assert result == {
         "args": ["--version", "2.0.0", "apply"],
         "repo_root": str(tmp_path.resolve()),
-        "online": "1",
+        "online": None,
         "operation": None,
     }

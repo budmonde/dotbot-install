@@ -90,7 +90,6 @@ The child process receives:
 | Variable | Meaning |
 | --- | --- |
 | `DOTBOT_INSTALL_REPO_ROOT` | Canonical path to the owning repository. |
-| `DOTBOT_INSTALL_ONLINE` | `1` unless the launcher disables online work. |
 
 The plugin does not define installer identity,
 state storage,

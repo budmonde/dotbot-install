@@ -38,7 +38,6 @@ The child receives:
 | Variable | Meaning |
 | --- | --- |
 | `DOTBOT_INSTALL_REPO_ROOT` | Canonical consuming-repository path. |
-| `DOTBOT_INSTALL_ONLINE` | `1` unless the launcher disables online work. |
 
 ## Output and states
 
@@ -63,7 +62,7 @@ After `apply` or `upgrade`, `current`, `update-available`, and `unsupported` are
 ## Operation policy
 
 `status` is read-only.
-Optional update discovery must respect `DOTBOT_INSTALL_ONLINE` and must not invalidate an otherwise acceptable installation when discovery alone fails.
+`status` uses locally available state and must not make network requests to discover updates.
 
 For an unpinned resource:
 
