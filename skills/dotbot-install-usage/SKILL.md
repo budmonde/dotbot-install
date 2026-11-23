@@ -1,16 +1,25 @@
 ---
-name: dotbot-install-authoring
-description: Author or review lifecycle resources for the dotbot-install Dotbot plugin, including ownership, status/apply/upgrade semantics, exact versions, interaction boundaries, destructive operations, and proportionate verification. Use when adding or changing an install directive resource; not for native Dotbot links or cleanup, or for one-shot shell actions with no meaningful lifecycle.
+name: dotbot-install-usage
+description: Use when selecting or configuring a resource for a Dotbot install directive, or when authoring or reviewing its installer. Covers provider reuse, recipe arguments, lifecycle operations, ownership, interaction, and verification.
 ---
 
-# Dotbot install authoring
+# Dotbot install usage
 
 The plugin owns invocation and lifecycle vocabulary.
 The consuming repository owns resource policy, backend helpers, and post-install validation.
 
+## Select a resource
+
+Use a native Dotbot directive for links or cleanup and a short shell action for a one-time step with no useful status or repair operation.
+For package installation, check which distribution upstream provides for the target host and whether the installer can use it with the available privileges and runtime.
+Inspect the consuming repository’s existing provider installers.
+If one already implements the required behavior, invoke it directly with the package name or ID and any supported version argument in the recipe.
+See the [plugin protocol](references/protocol.md) for the argument form and the lifecycle the provider must satisfy.
+For a recipe-only addition, verify the selected invocation and the installed capability using the consuming repository’s checks.
+
 ## Establish the accepted contract
 
-Before writing code:
+When a new or changed installer is needed:
 
 1. Read [the plugin protocol](references/protocol.md).
 2. Inspect the latest accepted user direction, relevant design artifact, closest committed installer, and any review correction in its history.
@@ -33,12 +42,8 @@ Inventory, rotation, cleanup, migration, and account selection each require an a
 
 ## Choose the smallest surface
 
-Use this order:
-
-1. A native Dotbot directive for links, cleanup, and configuration state it already models.
-2. A short `shell` action when there is no useful read-only probe, version authority, or repair policy.
-3. A thin resource wrapper over an existing consuming-repository backend.
-4. A custom lifecycle resource only for irreducible resource policy.
+Keep resource-specific decisions, such as which release asset to select, in a thin wrapper when an existing backend can handle the lifecycle.
+Implement a custom lifecycle only when the required behavior goes beyond the available backends.
 
 Extract a backend when at least two real resources share lifecycle semantics, not merely similar commands.
 If a custom resource is much larger than its nearest committed peers, identify the irreducible differences before keeping that size.

@@ -23,6 +23,13 @@ Platform affinity follows the first command item's path component:
 - `install/windows/` runs only on Windows;
 - `install/unix/` runs on Linux, macOS, and WSL.
 
+## Select an operation
+
+The lifecycle runner selects `apply` by default and `upgrade` when passed `--upgrade`.
+It forwards all remaining arguments to Dotbot in order, including `--help` and `--version`.
+Repository launchers can import `run_dotbot` from `runner.py` to use the same argument handling.
+When invoking Dotbot directly, set `DOTBOT_INSTALL_OPERATION=status` for a read-only run.
+
 ## Script interface
 
 The plugin invokes one of these forms:
