@@ -116,17 +116,8 @@ class Install(Plugin):
         valid = True
         for installer_argv, description in configured_installers:
             configured_path, installer_arguments = installer_argv[0], installer_argv[1:]
-            resolved = self._resolve_installer(configured_path)
-            if resolved is None:
-                valid = False
-                continue
-            installer_path, affinity = resolved
-            if affinity != "shared" and affinity != host_family:
-                self._log.error(
-                    "Installer {} targets {}, but Dotbot is running on {}".format(
-                        configured_path, affinity, host_family
-                    )
-                )
+            installer_path = self._resolve_installer(configured_path)
+            if installer_path is None:
                 valid = False
                 continue
 
@@ -199,30 +190,24 @@ class Install(Plugin):
         self._log.info("{}: {}".format(installer_command, state))
         return True
 
-    def _resolve_installer(self, configured_path: str) -> Optional[Tuple[Path, str]]:
+    def _resolve_installer(self, configured_path: str) -> Optional[Path]:
         repo_root = Path(self._context.base_directory()).resolve()
-        install_root = (repo_root / "install").resolve()
         configured = Path(configured_path)
-        if configured.is_absolute() or configured.drive:
+        if configured.anchor:
             self._log.error("Installer paths must be relative to the Dotbot repository")
             return None
 
         installer_path = (repo_root / configured).resolve()
         try:
-            relative = installer_path.relative_to(install_root)
+            installer_path.relative_to(repo_root)
         except ValueError:
-            self._log.error("Installer paths must remain within the repository install directory")
+            self._log.error("Installer paths must remain within the Dotbot repository")
             return None
 
         if not installer_path.is_file():
             self._log.error("Installer does not exist or is not a file: {}".format(configured_path))
             return None
-        if not relative.parts or relative.parts[0].lower() not in {"shared", "unix", "windows"}:
-            self._log.error("Installers must live under install/shared, install/unix, or install/windows")
-            return None
-
-        affinity = relative.parts[0].lower()
-        return installer_path, affinity
+        return installer_path
 
     def _command(
         self,

@@ -6,8 +6,8 @@ The plugin accepts a nonempty ordered list of command-description entries:
 
 ```yaml
 - install:
-    - [install/shared/example.py, Installing the shared example]
-    - [[install/unix/example, configured-target, --version, "1.2.3"], Installing the Unix example]
+    - [install/resources/example.py, Installing the shared example]
+    - [[install/resources/other-tool/unix.sh, configured-target, --version, "1.2.3"], Installing the Unix example]
 ```
 
 The first item is a repository-relative installer path or argument list, and the second is the nonempty description logged before execution.
@@ -17,11 +17,7 @@ Each list item becomes exactly one process argument without shell parsing.
 Installer-specific configuration belongs in the command, including an optional `--version <desired-version>` argument when the installer supports exact versions.
 The plugin preflights the whole list and stops after the first execution failure.
 
-Platform affinity follows the first command item's path component:
-
-- `install/shared/` runs on Windows and Unix-family hosts;
-- `install/windows/` runs only on Windows;
-- `install/unix/` runs on Linux, macOS, and WSL.
+The recipe chooses the installer, and the script checks host support and prerequisites.
 
 ## Select an operation
 
@@ -96,7 +92,7 @@ Windows PowerShell resources use PowerShell 7 when available and Windows PowerSh
 Unix resources other than Python must be executable and provide their own shebang.
 
 Dotbot dry-run logs prepared resources without starting child processes.
-The plugin rejects absolute paths, missing files, platform mismatches, and resolved paths that escape the consuming repository's `install/` tree.
+The plugin rejects absolute paths, missing files, paths that resolve outside Dotbot's base directory, and files it cannot launch on the current host.
 
 ## Ownership boundary
 

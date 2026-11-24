@@ -52,16 +52,23 @@ def recording_installer(marker: Path, name: str, state: str = "current") -> str:
     )
 
 
-def test_apply_runs_one_installer_and_accepts_current(tmp_path: Path) -> None:
-    write_python_installer(
-        tmp_path,
-        "install/shared/tool.py",
-        python_installer("current"),
-    )
+@pytest.mark.parametrize(
+    ("path", "host"),
+    [
+        ("install/shared/tool.py", "unix"),
+        ("install/resources/tool.py", "windows"),
+        ("setup.py", "windows"),
+        ("scripts/tool/bootstrap.unix.py", "windows"),
+        ("scripts/tool/windows.py", "unix"),
+    ],
+)
+def test_apply_runs_one_installer_and_accepts_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str, host: str
+) -> None:
+    write_python_installer(tmp_path, path, python_installer("current"))
+    monkeypatch.setattr(Install, "_host_family", staticmethod(lambda: host))
 
-    assert make_plugin(tmp_path).handle(
-        "install", [installer("install/shared/tool.py")]
-    )
+    assert make_plugin(tmp_path).handle("install", [installer(path)])
 
 
 def test_description_is_logged_with_installer_path(tmp_path: Path) -> None:
@@ -237,27 +244,25 @@ def test_list_stops_after_first_execution_failure(tmp_path: Path) -> None:
     assert not marker.exists()
 
 
-def test_path_must_remain_under_install(tmp_path: Path) -> None:
+def test_path_must_be_repository_relative(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    inside = write_python_installer(repo, "setup.py", python_installer("current"))
     write_python_installer(tmp_path, "outside.py", python_installer("current"))
 
-    assert not make_plugin(tmp_path).handle(
-        "install", [installer("install/shared/../../outside.py")]
-    )
+    for path in ("../outside.py", str(inside)):
+        assert not make_plugin(repo).handle("install", [installer(path)])
 
 
-def test_platform_mismatch_fails_before_execution(
+def test_unlaunchable_script_fails_before_any_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     marker = tmp_path / "marker"
-    write_python_installer(
-        tmp_path,
-        "install/unix/tool.py",
-        python_installer("current", marker=marker),
-    )
+    write_python_installer(tmp_path, "setup.py", python_installer("current", marker=marker))
+    (tmp_path / "tool.sh").write_text("#!/bin/sh\necho current\n", encoding="utf-8")
     monkeypatch.setattr(Install, "_host_family", staticmethod(lambda: "windows"))
 
     assert not make_plugin(tmp_path).handle(
-        "install", [installer("install/unix/tool.py")]
+        "install", [installer("setup.py"), installer("tool.sh")]
     )
     assert not marker.exists()
 

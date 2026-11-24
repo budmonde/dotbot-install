@@ -6,12 +6,12 @@ Use it to run a repository’s installers in recipe order and report whether eac
 ## Use the plugin
 
 Use Python 3.8 or newer and Dotbot 1.23 or newer.
-The example assumes a consuming repository with Dotbot at `dotbot/`, this plugin at `dotbot-install/`, and an npm installer at `install/shared/npm-global.py` that accepts a package name.
+The example assumes a consuming repository with Dotbot at `dotbot/`, this plugin at `dotbot-install/`, and an npm installer at `install/resources/npm-global.py` that accepts a package name.
 In the consuming repository, add this entry to `install.conf.yaml`:
 
 ```yaml
 - install:
-    - [[install/shared/npm-global.py, prettier], Installing Prettier]
+    - [[install/resources/npm-global.py, prettier], Installing Prettier]
 ```
 
 Preview it from that repository’s root:
